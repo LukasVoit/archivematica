@@ -27,6 +27,7 @@ from django.forms.widgets import TextInput, Select
 from django.utils.translation import ugettext_lazy as _
 
 from components import helpers
+from contrib.mcp.client import MCPClient
 from installer.forms import site_url_field, load_site_url
 from main import models
 
@@ -408,13 +409,11 @@ class ProcessingConfigurationForm(forms.Form):
         'type': 'chain_choice',
         'name': 'upload_dip',
         'label': 'Upload DIP',
-        'ignored_choices': []
     }
     processing_fields['5e58066d-e113-4383-b20b-f301ed4d751c'] = {
         'type': 'chain_choice',
         'name': 'store_dip',
         'label': _('Store DIP'),
-        'ignored_choices': []
     }
     processing_fields['cd844b6e-ab3c-4bc6-b34f-7103f88715de'] = {
         'type': 'storage_service',
@@ -437,6 +436,12 @@ class ProcessingConfigurationForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super(ProcessingConfigurationForm, self).__init__(*args, **kwargs)
+
+        try:
+            self._augment_config_with_choices()
+        except Exception:
+            pass  # TODO
+
         for choice_uuid, field in self.processing_fields.items():
             ftype = field['type']
             opts = self.DEFAULT_FIELD_OPTS.copy()
@@ -456,25 +461,37 @@ class ProcessingConfigurationForm(forms.Form):
                         choices.append((field['yes_option'], _('Yes')))
                     if 'no_option' in field:
                         choices.append((field['no_option'], _('No')))
-                elif ftype == 'chain_choice':
-                    chain_choices = models.MicroServiceChainChoice.objects.filter(choiceavailableatlink_id=choice_uuid)
-                    ignored_choices = field.get('ignored_choices', [])
-                    for item in chain_choices:
-                        chain = item.chainavailable
-                        if ((chain.description in ignored_choices) or
-                                (not choice_is_available(item, settings))):
-                            continue
-                        choices.append((chain.pk, chain.description))
-                elif ftype == 'replace_dict':
-                    replace_dicts = models.MicroServiceChoiceReplacementDic.objects.filter(choiceavailableatlink_id=choice_uuid)
-                    for item in replace_dicts:
-                        choices.append((item.pk, item.description))
+                elif ftype in ('chain_choice', 'replace_dict'):
+                    choices = field.get('choices', [])
+                    # ignored_choices = field.get('ignored_choices', [])
+                    #if ((chain.description in ignored_choices) or (not choice_is_available(item, settings))): continue
                 elif ftype == 'storage_service':
                     choices.append(('/api/v2/location/default/{}/'.format(field['purpose']), _('Default location')))
                     for loc in get_storage_locations(purpose=field['purpose']):
                         choices.append((loc['resource_uri'], loc['description']))
                 self.fields[choice_uuid] = forms.ChoiceField(widget=Select(attrs={'class': 'form-control'}),
                                                              **opts)
+
+    def _augment_config_with_choices(self):
+        """Augment ``processing_fields`` with chain choices.
+
+        This function pulls the list of chain choices from the server and
+        includes them in the processing field configurations. It only applies
+        to links of type chain choice and replacement dicts.
+
+        The solution is chatty (one request per field) which is not ideal when
+        using Gearman RPC. However this is not in a criticla path as it's just
+        a configuration page. Also, we're planning to use gRPC (http2) in the
+        futur ewhere the overhead would be affordable.
+        """
+        client = MCPClient()
+        for link_id, form_config in {
+            k: v for k, v in processing_fields.items()
+            if v['type'] in ('chain_choice', 'replace_dict')
+        }.iteritems():
+            link = client.get_link(link_id)
+            form_config['_choices'] = link['choices']
+
 
     def load_config(self, name):
         """

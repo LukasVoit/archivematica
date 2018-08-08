@@ -28,6 +28,7 @@ import gearman
 
 from databaseFunctions import auto_close_db
 from linkTaskManagerChoice import choicesAvailableForUnits
+from main.models import MicroServiceChainLink, MicroServiceChainChoice
 from package import create_package
 
 
@@ -129,6 +130,41 @@ def package_create_handler(*args, **kwargs):
     return create_package(*args, **kwargs).pk
 
 
+@auto_close_db
+@pickle_result
+@unpickle_payload
+@log_exceptions(LOGGER)
+def get_link_handler(*args, **kwargs):
+    payload = kwargs['payload']
+    try:
+        link = MicroServiceChainLink.objects.get(pk=payload['id'])
+    except (KeyError, MicroServiceChainLink.DoesNotExist):
+        raise Exception("Not found")
+    resp = {'id': link.pk}
+    # Expand response with choices.
+    link_desc = link.currenttask.tasktypepkreference.description
+    qslist = None
+    if link_desc == 'get user choice to proceed with':
+        qslist = models.MicroServiceChainChoice.objects.filter(
+            choiceavailableatlink=link).values_list(
+                'id', 'chainavailable__description')
+    elif link_desc == 'get replacement dic from user choice':
+        qslist = models.MicroServiceChoiceReplacementDic.objects.filter(
+            choiceavailableatlink=link).values_list(
+                'id', 'description')
+    if qslist is not None and len(qslist) > 0:
+        resp['choices'] = list(qslist)
+    return resp
+
+
+@auto_close_db
+@pickle_result
+@unpickle_payload
+@log_exceptions(LOGGER)
+def get_chain_by_description_handler(*args,  **kwargs):
+    pass
+
+
 def startRPCServer():
     gm_worker = gearman.GearmanWorker([django_settings.GEARMAN_SERVER])
     hostID = gethostname() + "_MCPServer"
@@ -138,6 +174,8 @@ def startRPCServer():
     gm_worker.register_task("approveJob", job_approve_handler)
     gm_worker.register_task("getJobsAwaitingApproval", job_awaiting_approval_handler)
     gm_worker.register_task("packageCreate", package_create_handler)
+    gm_worker.register_task("getLink", get_link_handler)
+    gm_worker.register_task("getChainByDescription", get_chain_by_description_handler)
 
     failMaxSleep = 30
     failSleep = 1

@@ -90,3 +90,9 @@ class MCPClient:
             return cPickle.loads(response.result)  # Transfer ID (pickled)
         elif response.state == gearman.JOB_FAILED:
             raise RPCError('MCPServer returned an error (check the logs)')
+
+    def get_link(self):
+        pass
+
+    def get_chain_by_description(self):
+        pass
