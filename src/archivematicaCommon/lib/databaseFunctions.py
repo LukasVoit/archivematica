@@ -31,7 +31,7 @@ import uuid
 
 from django.db import close_old_connections
 from django.db.models import Q
-from django.utils import timezone
+from django.utils import six, timezone
 from main.models import Agent, Derivation, Event, File, FPCommandOutput, Job, SIP, Task, Transfer, UnitVariable
 
 LOGGER = logging.getLogger('archivematica.common')
@@ -359,7 +359,7 @@ def deUnicode(str):
     """
     if str is None:
         return None
-    return unicode(str).encode('utf-8')
+    return six.text_type(str).encode('utf-8')
 
 
 def retryOnFailure(description, callback, retries=10):
